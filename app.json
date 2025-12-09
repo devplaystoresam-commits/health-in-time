@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "health-in-time",
+    "slug": "health-in-time",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/image/logo.png",
+    "scheme": "healthintime",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/image/logo.png"
+      },
+      "package": "com.rafael.healthintime",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/image/logo.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/image/logo.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#000000"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a720b3de-e18d-42b4-957a-0cc6e4352f0d"
+      }
+    }
+  }
+}
