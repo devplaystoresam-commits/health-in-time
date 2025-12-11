@@ -19,6 +19,11 @@ import {
 } from "react-native";
 import { supabase } from "../utils/supabase";
 
+import { makeRedirectUri } from "expo-auth-session";
+import * as WebBrowser from "expo-web-browser";
+
+WebBrowser.maybeCompleteAuthSession();
+
 export default function LoginScreen() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -36,17 +41,52 @@ export default function LoginScreen() {
       Alert.alert("Erro no Login", error.message);
     } else {
       router.replace("/home");
-      // Alert.alert("Sucesso", "Login realizado com sucesso!");
     }
     setLoading(false);
   }
 
-  // Placeholder para login Google
   async function signInWithGoogle() {
-    Alert.alert(
-      "Google Login",
-      "Funcionalidade de login com Google será implementada."
-    );
+    try {
+      const redirectUri = makeRedirectUri({
+        scheme: "healthintime",
+        path: "auth",
+      });
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: redirectUri,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error) throw error;
+
+      const res = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
+
+      if (res.type === "success" && res.url) {
+        // Extrair tokens da URL (hash fragment)
+        const params: any = {};
+        const hash = res.url.split("#")[1];
+        if (hash) {
+          hash.split("&").forEach((part) => {
+            const [key, value] = part.split("=");
+            params[key] = decodeURIComponent(value);
+          });
+        }
+
+        if (params.access_token && params.refresh_token) {
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token: params.access_token,
+            refresh_token: params.refresh_token,
+          });
+          if (sessionError) throw sessionError;
+          router.replace("/home");
+        }
+      }
+    } catch (e) {
+      Alert.alert("Erro Google Login", e.message);
+    }
   }
 
   return (

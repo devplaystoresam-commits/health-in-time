@@ -20,11 +20,12 @@ import * as Notifications from "expo-notifications"; // Adicione ao topo
 
 // Configuração básica do Handler de notificações (pode ficar fora do componente ou num arquivo de config)
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async () =>
+    ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    } as Notifications.NotificationBehavior), // Cast para satisfazer tipos
 });
 
 export default function ProfileScreen() {
@@ -43,6 +44,7 @@ export default function ProfileScreen() {
   useEffect(() => {
     fetchProfile();
     checkPermissions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleLogout() {
@@ -111,7 +113,7 @@ export default function ProfileScreen() {
         setEmail(user.email || "");
 
         // Buscar dados extras na tabela de profiles
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from("profiles")
           .select("full_name, birth_date")
           .eq("id", user.id)
@@ -131,8 +133,58 @@ export default function ProfileScreen() {
     } catch (error) {
       console.log("Erro ao buscar perfil", error);
     } finally {
-      setLoading(false);
+      if (loading) setLoading(false);
     }
+  }
+
+  async function handleDeleteAccount() {
+    Alert.alert(
+      "Excluir Conta",
+      "Tem certeza que deseja excluir sua conta? Todos os seus dados serão perdidos permanentemente.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setLoading(true);
+              const {
+                data: { user },
+              } = await supabase.auth.getUser();
+
+              if (user) {
+                // Tentar excluir dados do usuário (medicines, profiles)
+                // Se o DB estiver configurado com CASCADE no user_id, ao deletar o user do Auth resolveria,
+                // mas como não temos acesso ao Auth Admin aqui, vamos limpar os dados públicos e deslogar.
+                // O usuário do Auth permanecerá "ativo" mas sem dados, ou precisaríamos de uma Edge Function para deletar de fato.
+
+                // 1. Deletar medicamentos
+                await supabase
+                  .from("medicines")
+                  .delete()
+                  .eq("user_id", user.id);
+
+                // 2. Deletar perfil
+                await supabase.from("profiles").delete().eq("id", user.id);
+
+                // 3. SignOut
+                await supabase.auth.signOut();
+                router.replace("/login");
+              }
+            } catch (error) {
+              console.log("Erro ao excluir conta:", error);
+              Alert.alert(
+                "Erro",
+                "Não foi possível excluir a conta. Tente novamente."
+              );
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
   }
 
   return (
@@ -142,6 +194,20 @@ export default function ProfileScreen() {
         colors={["#0F0C29", "#302B63", "#24243E"]}
         style={styles.container}
       >
+        {loading && (
+          <View
+            style={{
+              position: "absolute",
+              top: 40,
+              left: 0,
+              right: 0,
+              zIndex: 10,
+              alignItems: "center",
+            }}
+          >
+            <Text style={{ color: "white" }}>Carregando...</Text>
+          </View>
+        )}
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {/* Header: Botão Voltar e Logout */}
           <View
@@ -237,6 +303,22 @@ export default function ProfileScreen() {
               />
             </View>
           </View>
+
+          {/* Botão de Excluir Conta */}
+          <TouchableOpacity
+            style={styles.deleteAccountButton}
+            onPress={handleDeleteAccount}
+          >
+            <View style={styles.deleteAccountInner}>
+              <MaterialCommunityIcons
+                name="alert-circle-outline"
+                size={24}
+                color="#FF4444"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.deleteAccountText}>EXCLUIR CONTA</Text>
+            </View>
+          </TouchableOpacity>
 
           {/* Footer Logo */}
           <View style={styles.footer}>
@@ -368,5 +450,29 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontFamily: "serif",
     fontWeight: "bold",
+  },
+  deleteAccountButton: {
+    marginTop: 20,
+    marginBottom: 40,
+    width: "100%",
+    alignItems: "center",
+  },
+  deleteAccountInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 68, 68, 0.5)",
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 68, 68, 0.1)",
+    width: "80%",
+  },
+  deleteAccountText: {
+    color: "#FF4444",
+    fontSize: 14,
+    fontWeight: "bold",
+    letterSpacing: 1,
   },
 });

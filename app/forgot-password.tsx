@@ -1,11 +1,12 @@
 import { FontAwesome5, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -25,72 +26,157 @@ export default function ForgotPasswordScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<"request" | "reset">("request"); // Controla se está pedindo o código ou resetando
+  const [isRecoverySession, setIsRecoverySession] = useState(false);
 
-  // Passo 1: Solicitar o código OTP para o email
+  // Função auxiliar para extrair parâmetros da URL (hash)
+  const extractParamsFromUrl = (url: string) => {
+    const params: Record<string, string> = {};
+    // O Supabase envia tokens no fragmento (#)
+    const parts = url.split("#");
+    if (parts.length > 1) {
+      const hash = parts[1];
+      hash.split("&").forEach((part) => {
+        const [key, value] = part.split("=");
+        if (key && value) {
+          params[key] = decodeURIComponent(value);
+        }
+      });
+    }
+    return params;
+  };
+
+  // 1. Monitora Deep Links manualmente (necessário pois detectSessionInUrl: false)
+  useEffect(() => {
+    const handleDeepLink = async (url: string | null) => {
+      if (!url) return;
+
+      const params = extractParamsFromUrl(url);
+      if (
+        params.access_token &&
+        params.refresh_token &&
+        params.type === "recovery"
+      ) {
+        setLoading(true);
+        const { error } = await supabase.auth.setSession({
+          access_token: params.access_token,
+          refresh_token: params.refresh_token,
+        });
+        setLoading(false);
+
+        if (error) {
+          Alert.alert("Erro no Link", "O link expirou ou é inválido.");
+        } else {
+          // Sessão estabelecida com sucesso
+          setIsRecoverySession(true);
+          setStep("reset");
+        }
+      }
+    };
+
+    // Check inicial (Cold Start)
+    Linking.getInitialURL().then(handleDeepLink);
+
+    // Listener (Warm Start)
+    const subscription = Linking.addEventListener("url", (event) => {
+      handleDeepLink(event.url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  // Monitora mudanças na autenticação (Deep Link)
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === "PASSWORD_RECOVERY") {
+          setStep("reset");
+          setIsRecoverySession(true); // Adicionado para indicar que a sessão de recuperação está ativa
+          if (session?.user?.email) {
+            setEmail(session.user.email);
+          }
+        }
+      }
+    );
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Passo 1: Solicitar o link para o email
   async function handleRequestCode() {
     if (!email) {
       Alert.alert("Erro", "Por favor, digite seu e-mail.");
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
 
-    // Nota: O comportamento padrão do resetPasswordForEmail envia um LINK.
-    // Para funcionar com CÓDIGO (OTP) no mobile, você precisa configurar o template de email no Supabase
-    // para enviar o {{ .Token }} ou usar a lógica de OTP.
-    // Vamos assumir aqui que o usuário vai receber um código ou link mágico.
+    // Envia o link de redefinição apontando para o esquema do app
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: "healthintime://forgot-password",
+    });
 
     if (error) {
       Alert.alert("Erro", error.message);
     } else {
       Alert.alert(
-        "Sucesso",
-        "Código de verificação enviado para o seu e-mail!"
+        "Verifique seu e-mail",
+        "Enviamos um link para redefinição de senha. Clique no link para voltar ao app e definir sua nova senha."
       );
-      setStep("reset");
+      // Não mudamos o step imediatamente para 'reset' forçado, esperamos o usuário clicar no link
+      // ou se ele tiver um código manual, ele pode navegar.
+      // Opcional: Se quiser permitir digitação manual de token, mantenha a opção visual.
     }
     setLoading(false);
   }
 
-  // Passo 2: Verificar o código e atualizar a senha
+  // Passo 2: Atualizar a senha (já autenticado pelo Link ou via Token)
   async function handleResetPassword() {
     if (newPassword !== confirmPassword) {
       Alert.alert("Erro", "As senhas não coincidem.");
       return;
     }
-    if (!code || !newPassword) {
-      Alert.alert("Erro", "Preencha o código e a nova senha.");
+    if (!newPassword) {
+      Alert.alert("Erro", "Preencha a nova senha.");
       return;
     }
 
     setLoading(true);
 
-    // 1. Verificar o OTP
-    const { data, error: verifyError } = await supabase.auth.verifyOtp({
-      email,
-      token: code,
-      type: "recovery",
-    });
+    // Se o usuário veio pelo LINK, ele já tem uma sessão válida do tipo "PASSWORD_RECOVERY"
+    // Então basta atualizar o usuário.
+    // Se você ainda quiser suportar o código manual (OTP) sem link, a lógica seria diferente,
+    // mas o padrão do resetPasswordForEmail é Link.
 
-    if (verifyError) {
-      Alert.alert("Erro ao verificar código", verifyError.message);
-      setLoading(false);
-      return;
-    }
-
-    // 2. Se verificado com sucesso, atualizar o usuário (a sessão é criada automaticamente após verifyOtp)
-    if (data.session) {
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: newPassword,
+    // Caso o usuário tenha digitado um código manual:
+    if (code && !isRecoverySession) {
+      // Verifica o código APENAS se não for uma sessão de recuperação via link
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
+        email,
+        token: code,
+        type: "recovery",
       });
-
-      if (updateError) {
-        Alert.alert("Erro ao atualizar senha", updateError.message);
-      } else {
-        Alert.alert("Sucesso", "Sua senha foi redefinida!");
-        router.replace("/login");
+      if (verifyError) {
+        Alert.alert("Erro no código", verifyError.message);
+        setLoading(false);
+        return;
       }
     }
+
+    // Atualiza a senha
+    const { error: updateError } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+
+    if (updateError) {
+      Alert.alert("Erro ao atualizar senha", updateError.message);
+    } else {
+      Alert.alert("Sucesso", "Sua senha foi redefinida!");
+      router.replace("/login");
+    }
+
     setLoading(false);
   }
 
@@ -126,58 +212,72 @@ export default function ForgotPasswordScreen() {
                 <FontAwesome5 name="user-alt" size={50} color="#00BFFF" />
               </View>
               {/* Nome do usuário oculto/placeholder até sabermos quem é */}
-              <Text style={styles.userNameText}>Recuperar Senha</Text>
+              <Text style={styles.userNameText}>
+                {step === "reset" ? "Nova Senha" : "Recuperar Senha"}
+              </Text>
             </View>
 
             {/* Formulário */}
             <View style={styles.formContainer}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>E-mail :</Text>
-                <TextInput
-                  style={styles.input}
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  placeholder="seu.email@exemplo.com"
-                  placeholderTextColor="#666"
-                />
-              </View>
+              {step === "request" && (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>E-mail :</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    placeholder="seu.email@exemplo.com"
+                    placeholderTextColor="#666"
+                  />
+                </View>
+              )}
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Código de Verificação</Text>
-                <TextInput
-                  style={styles.input}
-                  value={code}
-                  onChangeText={setCode}
-                  placeholder="Código recebido no e-mail"
-                  placeholderTextColor="#666"
-                />
-              </View>
+              {/* Só mostra campo de código se estiver no passo reset E NÃO for via link (sessão ativa) 
+                  Se o usuário quiser digitar código manual, ele teria que ter digitado antes ou ter um fluxo pra isso.
+                  Como focamos no link, se isRecoverySession for true, ESCONDE o código.
+              */}
+              {step === "reset" && !isRecoverySession && (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Código de Verificação</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={code}
+                    onChangeText={setCode}
+                    placeholder="Código recebido no e-mail"
+                    placeholderTextColor="#666"
+                  />
+                </View>
+              )}
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Nova Senha:</Text>
-                <TextInput
-                  style={styles.input}
-                  value={newPassword}
-                  onChangeText={setNewPassword}
-                  secureTextEntry
-                  placeholder="**********"
-                  placeholderTextColor="#666"
-                />
-              </View>
+              {step === "reset" && (
+                <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Nova Senha:</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      secureTextEntry
+                      placeholder="**********"
+                      placeholderTextColor="#666"
+                    />
+                  </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Confirmar nova senha:</Text>
-                <TextInput
-                  style={styles.input}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  secureTextEntry
-                  placeholder="**********"
-                  placeholderTextColor="#666"
-                />
-              </View>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Confirmar nova senha:</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={confirmPassword}
+                      onChangeText={setConfirmPassword}
+                      secureTextEntry
+                      placeholder="**********"
+                      placeholderTextColor="#666"
+                    />
+                  </View>
+                </>
+              )}
             </View>
 
             {/* Footer / Ação */}

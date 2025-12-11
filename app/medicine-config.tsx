@@ -15,13 +15,7 @@ import {
 } from "react-native";
 import { supabase } from "../utils/supabase";
 
-// Helper para selecionar imagem do remédio
-const MEDICINE_IMAGES = {
-  red: require("../assets/image/vemelho.png"),
-  blue: require("../assets/image/azul.png"),
-  white: require("../assets/image/branco.png"),
-  yellow: require("../assets/image/amarelo.png"),
-};
+import { MEDICINE_IMAGES } from "../utils/medicine-constants";
 
 export default function MedicineConfigScreen() {
   const router = useRouter();
@@ -55,14 +49,18 @@ export default function MedicineConfigScreen() {
     requestPermissions();
 
     if (id) {
-      loadMedicineData(id);
+      const idString = Array.isArray(id) ? id[0] : id;
+      loadMedicineData(idString);
     } else {
-      if (initialName) setName(initialName as string);
-      if (iconType) setSelectedImage(iconType as string);
+      if (initialName)
+        setName(Array.isArray(initialName) ? initialName[0] : initialName);
+      if (iconType)
+        setSelectedImage(Array.isArray(iconType) ? iconType[0] : iconType);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, initialName, iconType]);
 
-  async function loadMedicineData(medicineId) {
+  async function loadMedicineData(medicineId: string) {
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -97,7 +95,7 @@ export default function MedicineConfigScreen() {
   }
 
   // Máscara de Data (DD/MM/AAAA)
-  const handleDateChange = (text) => {
+  const handleDateChange = (text: string) => {
     // Remove tudo que não é número
     const cleaned = text.replace(/[^0-9]/g, "");
     let formatted = cleaned;
@@ -118,7 +116,7 @@ export default function MedicineConfigScreen() {
   };
 
   // Máscara de Hora (HH:MM)
-  const handleTimeChange = (text) => {
+  const handleTimeChange = (text: string) => {
     const cleaned = text.replace(/[^0-9]/g, "");
     let formatted = cleaned;
 
@@ -132,11 +130,11 @@ export default function MedicineConfigScreen() {
   };
 
   async function scheduleMedicationNotifications(
-    medicineId,
-    medName,
-    medInterval,
-    medDuration,
-    startDateTime
+    medicineId: string,
+    medName: string,
+    medInterval: number,
+    medDuration: number,
+    startDateTime: string
   ) {
     try {
       const totalHours = medDuration * 24;
@@ -189,7 +187,7 @@ export default function MedicineConfigScreen() {
 
       const startDateTimeString = `${formattedDate}T${startTime}:00`;
 
-      let medicineId = id;
+      let medicineId: string = Array.isArray(id) ? id[0] : id;
 
       if (id) {
         // MODO EDIÇÃO: Atualizar registro existente
@@ -259,8 +257,8 @@ export default function MedicineConfigScreen() {
         pathname: "/medicine-details",
         params: { id: medicineId },
       });
-    } catch (error) {
-      Alert.alert("Erro", error.message);
+    } catch (error: any) {
+      Alert.alert("Erro", error.message || "Erro desconhecido");
     } finally {
       setLoading(false);
     }
@@ -288,17 +286,31 @@ export default function MedicineConfigScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Seleção de Ícone (Visual do print: Tipo de Medicação ao lado da imagem) */}
+          {/* Seleção de Ícone */}
           <View style={styles.iconSelectionContainer}>
             <Text style={styles.labelTitle}>Tipo de Medicação:</Text>
-            <View style={styles.iconPreviewBox}>
-              <Image
-                source={MEDICINE_IMAGES[selectedImage]}
-                style={{ width: "80%", height: "80%" }}
-                resizeMode="contain"
-              />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {Object.keys(MEDICINE_IMAGES).map((key) => (
+                  <TouchableOpacity
+                    key={key}
+                    onPress={() => setSelectedImage(key)}
+                    style={[
+                      styles.iconPreviewBoxSmall,
+                      selectedImage === key && styles.selectedIconBox,
+                    ]}
+                  >
+                    <Image
+                      source={
+                        MEDICINE_IMAGES[key as keyof typeof MEDICINE_IMAGES]
+                      }
+                      style={{ width: "80%", height: "80%" }}
+                      resizeMode="contain"
+                    />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             </View>
-            {/* Aqui poderíamos ter botões para trocar a cor/imagem, por enquanto fixo ou com seletor simples */}
           </View>
 
           {/* Nome */}
@@ -307,13 +319,20 @@ export default function MedicineConfigScreen() {
             <TextInput
               style={[
                 styles.inputLarge,
-                { opacity: 0.7, backgroundColor: "#CCC" },
+                {
+                  opacity: initialName && !id ? 0.7 : 1,
+                  backgroundColor: "#D9D9D9",
+                },
               ]}
               value={name}
               onChangeText={setName}
               placeholder="Ex: Ibuprofeno"
               placeholderTextColor="#999"
-              editable={false} // Nome travado
+              editable={!initialName || !!id} // Permite editar se não veio do mock inicial ou se é edição (na verdade, edição geralmente trava nome, mas para "novo" deve ser livre)
+              // Melhor lógica: Se veio initialName e não tem ID, é configuração de mock => travado?
+              // Se eu quiser permitir criar novo, initialName virá vazio.
+              // Vamos simplificar: Se não tem initialName, é editavel.
+              // Se tem ID (edição), vamos deixar editável? Geralmente sim.
             />
           </View>
 
@@ -459,20 +478,22 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 16,
     fontWeight: "bold",
+    marginBottom: 5,
   },
-  iconPreviewBox: {
-    width: 80,
-    height: 80,
+  iconPreviewBoxSmall: {
+    width: 60,
+    height: 60,
     backgroundColor: "#3498DB",
-    borderRadius: 10,
+    borderRadius: 8,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#FFF",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    elevation: 5,
+    borderColor: "rgba(255,255,255,0.3)",
+    marginRight: 10,
+  },
+  selectedIconBox: {
+    borderColor: "#FFD700",
+    borderWidth: 3,
   },
   inputGroup: {
     marginBottom: 25,

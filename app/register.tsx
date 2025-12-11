@@ -27,40 +27,66 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Máscara de Data (DD/MM/AAAA)
+  const handleDateChange = (text) => {
+    const cleaned = text.replace(/[^0-9]/g, "");
+    let formatted = cleaned;
+    if (cleaned.length > 2)
+      formatted = `${cleaned.slice(0, 2)}/${cleaned.slice(2)}`;
+    if (cleaned.length > 4)
+      formatted = `${cleaned.slice(0, 2)}/${cleaned.slice(
+        2,
+        4
+      )}/${cleaned.slice(4, 8)}`;
+    if (formatted.length <= 10) setBirthDate(formatted);
+  };
+
   async function handleRegister() {
-    if (!email || !password || !name) {
-      Alert.alert("Atenção", "Preencha todos os campos obrigatórios.");
-      return;
-    }
+    try {
+      if (!email || !password || !name || !birthDate) {
+        Alert.alert("Atenção", "Preencha todos os campos obrigatórios.");
+        return;
+      }
 
-    setLoading(true);
+      setLoading(true);
 
-    // Tratamento básico da data (assumindo DD/MM/YYYY do input para YYYY-MM-DD do banco)
-    const [day, month, year] = birthDate.split("/");
-    const formattedDate = `${year}-${month}-${day}`;
+      // Tratamento da data
+      const parts = birthDate.split("/");
+      if (parts.length !== 3) {
+        Alert.alert("Erro", "Data de nascimento inválida. Use DD/MM/AAAA.");
+        setLoading(false);
+        return;
+      }
+      const [day, month, year] = parts;
+      const formattedDate = `${year}-${month}-${day}`;
 
-    const { error } = await supabase.auth.signUp({
-      email: email,
-      password: password,
-      options: {
-        data: {
-          full_name: name,
-          username: username,
-          birth_date: formattedDate, // Envia para ser salvo pelo Trigger
+      const { error } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+          data: {
+            full_name: name,
+            username: username,
+            birth_date: formattedDate,
+          },
         },
-      },
-    });
+      });
 
-    if (error) {
-      Alert.alert("Erro ao cadastrar", error.message);
-    } else {
-      Alert.alert(
-        "Sucesso",
-        "Cadastro realizado! Verifique seu email para confirmar."
-      );
-      router.back();
+      if (error) {
+        Alert.alert("Erro ao cadastrar", error.message);
+      } else {
+        Alert.alert(
+          "Sucesso",
+          "Cadastro realizado! Verifique seu email para confirmar."
+        );
+        router.back();
+      }
+    } catch (e) {
+      Alert.alert("Erro Inesperado", e.message);
+      console.log(e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (
@@ -115,7 +141,7 @@ export default function RegisterScreen() {
                 <TextInput
                   style={[styles.input, { width: 120 }]} // Input menor conforme print
                   value={birthDate}
-                  onChangeText={setBirthDate} // Ideal usar uma máscara aqui
+                  onChangeText={handleDateChange} // Máscara aplicada
                   placeholder="DD/MM/AAAA"
                   keyboardType="numeric"
                   placeholderTextColor="#666"

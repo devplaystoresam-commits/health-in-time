@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { MEDICINE_IMAGES } from "../utils/medicine-constants";
 import { supabase } from "../utils/supabase";
 
 // Simulando dados de remédios (Noite)
@@ -28,7 +29,8 @@ const ITEM_SIZE = (width - 60) / 3;
 
 export default function NightScreen() {
   const router = useRouter();
-  const [userMedicines, setUserMedicines] = useState([]);
+  const [userMedicines, setUserMedicines] = useState<any[]>([]);
+  const [combinedMedicines, setCombinedMedicines] = useState<any[]>([]);
 
   useFocusEffect(
     useCallback(() => {
@@ -42,39 +44,88 @@ export default function NightScreen() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("medicines")
-        .select("id, name")
+        .select("id, name, icon_type, period")
         .eq("user_id", user.id);
-      if (data) setUserMedicines(data);
+
+      if (data) {
+        setUserMedicines(data);
+
+        // Filter for Night period
+        const userMeds = data.filter((m) => m.period === "night" || !m.period); // !period fallback logic could be improved
+
+        const userMedNames = new Set(data.map((m) => m.name));
+        const mocksToShow = MOCK_MEDICINES.filter(
+          (m) => !userMedNames.has(m.name)
+        );
+
+        const normalizedUserMeds = userMeds.map((m: any) => ({
+          ...m,
+          image:
+            MEDICINE_IMAGES[m.icon_type as keyof typeof MEDICINE_IMAGES] ||
+            MEDICINE_IMAGES["white"],
+        }));
+
+        setCombinedMedicines([...normalizedUserMeds, ...mocksToShow]);
+      }
     } catch (e) {
       console.log(e);
     }
   }
 
-  const renderItem = (item) => {
+  const renderItem = (item: any) => {
     let iconType = "red";
     if (item.name === "Paracetamol") iconType = "white";
     if (item.name === "Amoxicilina") iconType = "blue";
     if (item.name === "Dorflex") iconType = "yellow";
 
-    const existingMedicine = userMedicines.find((m) => m.name === item.name);
+    const isUserMedicine = typeof item.id === "string"; // UUID é string
 
     return (
       <TouchableOpacity
         key={item.id}
         style={styles.gridItem}
         onPress={() => {
-          if (existingMedicine) {
+          if (isUserMedicine) {
             router.push({
               pathname: "/medicine-details",
-              params: { id: existingMedicine.id },
+              params: { id: item.id },
             });
           } else {
             router.push({
               pathname: "/medicine-config",
               params: { initialName: item.name, iconType: iconType },
             });
+          }
+        }}
+        onLongPress={() => {
+          if (isUserMedicine) {
+            Alert.alert(
+              "Excluir Medicamento",
+              "Deseja excluir este medicamento?",
+              [
+                { text: "Cancelar", style: "cancel" },
+                {
+                  text: "Excluir",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      const { error } = await supabase
+                        .from("medicines")
+                        .delete()
+                        .eq("id", item.id);
+
+                      if (error) throw error;
+                      fetchUserMedicines(); // Atualiza a lista
+                    } catch (e) {
+                      Alert.alert("Erro", "Falha ao excluir.");
+                      console.log(e);
+                    }
+                  },
+                },
+              ]
+            );
           }
         }}
       >
@@ -84,6 +135,38 @@ export default function NightScreen() {
             style={{ width: "80%", height: "80%" }}
             resizeMode="contain"
           />
+          {isUserMedicine && (
+            <TouchableOpacity
+              style={styles.deleteBadge}
+              onPress={() => {
+                Alert.alert("Excluir", "Apagar este medicamento?", [
+                  { text: "Não", style: "cancel" },
+                  {
+                    text: "Sim",
+                    style: "destructive",
+                    onPress: async () => {
+                      try {
+                        const { error } = await supabase
+                          .from("medicines")
+                          .delete()
+                          .eq("id", item.id);
+                        if (error) throw error;
+                        fetchUserMedicines();
+                      } catch (e) {
+                        console.log(e);
+                      }
+                    },
+                  },
+                ]);
+              }}
+            >
+              <MaterialCommunityIcons
+                name="close-circle"
+                size={24}
+                color="#FF4444"
+              />
+            </TouchableOpacity>
+          )}
         </View>
         <Text style={styles.itemText} numberOfLines={1}>
           {item.name}
@@ -92,15 +175,15 @@ export default function NightScreen() {
     );
   };
 
-  const renderAddButton = (index) => (
+  const renderAddButton = (index: number) => (
     <TouchableOpacity
       key={`add-${index}`}
       style={styles.gridItem}
       onPress={() =>
-        Alert.alert(
-          "Em Breve",
-          "Nas próximas atualizações você poderá incluir novos medicamentos."
-        )
+        // Navega para Configuração sem parâmetros
+        router.push({
+          pathname: "/medicine-config",
+        })
       }
     >
       <View style={[styles.iconBox, styles.addBox]}>
@@ -158,7 +241,7 @@ export default function NightScreen() {
 
           {/* Grid de Medicamentos */}
           <View style={styles.gridContainer}>
-            {MOCK_MEDICINES.map((med) => renderItem(med))}
+            {combinedMedicines.map((med) => renderItem(med))}
             {[...Array(5)].map((_, i) => renderAddButton(i))}
           </View>
 
@@ -274,5 +357,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: "serif",
     fontWeight: "bold",
+  },
+  deleteBadge: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    elevation: 5,
   },
 });

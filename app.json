@@ -2,7 +2,7 @@
   "expo": {
     "name": "health-in-time",
     "slug": "health-in-time",
-    "version": "1.0.0",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/image/logo.png",
     "scheme": "healthintime",

@@ -3,6 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
+  Alert,
   Dimensions,
   Image,
   ScrollView,
@@ -13,12 +14,7 @@ import {
 } from "react-native";
 import { supabase } from "../utils/supabase";
 
-const MEDICINE_IMAGES = {
-  red: require("../assets/image/vemelho.png"),
-  blue: require("../assets/image/azul.png"),
-  white: require("../assets/image/branco.png"),
-  yellow: require("../assets/image/amarelo.png"),
-};
+import { MEDICINE_IMAGES } from "../utils/medicine-constants";
 
 const { width } = Dimensions.get("window");
 
@@ -99,6 +95,39 @@ export default function MedicineDetailsScreen() {
     startDateDisplay = `${d}/${m}/${y}`;
   }
 
+  async function handleDelete() {
+    Alert.alert(
+      "Excluir Medicamento",
+      "Tem certeza que deseja remover este medicamento? Esta ação não pode ser desfeita.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setLoading(true);
+              const { error } = await supabase
+                .from("medicines")
+                .delete()
+                .eq("id", medicine!.id);
+
+              if (error) throw error;
+
+              // Voltar para a tela anterior (Morning ou Night)
+              // O useFocusEffect na tela anterior vai atualizar a lista
+              router.back();
+            } catch (e) {
+              Alert.alert("Erro", "Não foi possível excluir o medicamento.");
+              console.error(e);
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -109,7 +138,7 @@ export default function MedicineDetailsScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.headerRow}>
             <TouchableOpacity
-              onPress={() => router.push("/home")}
+              onPress={() => router.back()}
               style={styles.backButton}
             >
               <MaterialCommunityIcons
@@ -200,6 +229,19 @@ export default function MedicineDetailsScreen() {
             >
               <Text style={styles.editText}>EDITAR DOSAGENS E HORÁRIOS</Text>
             </LinearGradient>
+          </TouchableOpacity>
+
+          {/* Botão de Excluir */}
+          <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+            <View style={styles.deleteButtonInner}>
+              <MaterialCommunityIcons
+                name="trash-can-outline"
+                size={24}
+                color="#FF4444"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.deleteText}>EXCLUIR MEDICAMENTO</Text>
+            </View>
           </TouchableOpacity>
         </ScrollView>
       </LinearGradient>
@@ -351,6 +393,30 @@ const styles = StyleSheet.create({
   },
   editText: {
     color: "#FFF",
+    fontSize: 14,
+    fontWeight: "bold",
+    letterSpacing: 1,
+  },
+  deleteButton: {
+    marginTop: 20,
+    marginBottom: 40,
+    paddingVertical: 10,
+    width: "100%",
+    alignItems: "center",
+  },
+  deleteButtonInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 68, 68, 0.5)",
+    borderRadius: 25,
+    backgroundColor: "rgba(255, 68, 68, 0.1)",
+  },
+  deleteText: {
+    color: "#FF4444",
     fontSize: 14,
     fontWeight: "bold",
     letterSpacing: 1,

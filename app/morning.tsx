@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { MEDICINE_IMAGES } from "../utils/medicine-constants";
 import { supabase } from "../utils/supabase";
 
 // Simulando dados de remédios que viriam do Banco de Dados
@@ -28,7 +29,8 @@ const ITEM_SIZE = (width - 60) / 3; // 60 = paddings laterais e gaps
 
 export default function MorningScreen() {
   const router = useRouter();
-  const [userMedicines, setUserMedicines] = useState([]);
+  const [userMedicines, setUserMedicines] = useState<any[]>([]);
+  const [combinedMedicines, setCombinedMedicines] = useState<any[]>([]);
 
   // Buscar medicamentos cadastrados sempre que a tela ganhar foco
   useFocusEffect(
@@ -46,11 +48,44 @@ export default function MorningScreen() {
 
       const { data, error } = await supabase
         .from("medicines")
-        .select("id, name")
+        .select("id, name, icon_type, period")
         .eq("user_id", user.id);
 
       if (data) {
         setUserMedicines(data);
+
+        // Combinar Mocks e User Meds
+        // Prioridade: User Meds (se user já cadastrou "Paracetamol", usa o do user)
+        // Filtrar apenas do período 'morning' ??? Por enquanto vamos mostrar TUDO do user ou filtrar por 'morning'?
+        // O Mock não tem period, assume-se que são de manhã.
+        // Vamos mostrar todos os 'morning' do user + mocks não cadastrados.
+
+        // Filtra user meds que são da manhã (ou both se tiver)
+        // Nota: se o user criou como 'night', não deveria aparecer aqui?
+        // Vamos mostrar meds do user com period 'morning' ou null(pra garantir)
+        const userMeds = data.filter(
+          (m) => m.period === "morning" || !m.period
+        );
+
+        // Identifica nomes que o user já tem (em qualquer periodo? ou só neste?)
+        // Se eu tenho Ibuprofeno a noite, posso querer Ibuprofeno de manha tb?
+        // Simplificação: Se existe no DB, usa do DB.
+
+        const userMedNames = new Set(data.map((m) => m.name));
+
+        const mocksToShow = MOCK_MEDICINES.filter(
+          (m) => !userMedNames.has(m.name)
+        );
+
+        // Normalizar userMeds para ter a propriedade 'image' baseada no 'icon_type'
+        const normalizedUserMeds = userMeds.map((m: any) => ({
+          ...m,
+          image:
+            MEDICINE_IMAGES[m.icon_type as keyof typeof MEDICINE_IMAGES] ||
+            MEDICINE_IMAGES["white"], // fallback
+        }));
+
+        setCombinedMedicines([...normalizedUserMeds, ...mocksToShow]);
       }
     } catch (error) {
       console.log("Erro ao buscar medicamentos:", error);
@@ -58,7 +93,7 @@ export default function MorningScreen() {
   }
 
   // Função para renderizar cada item (Remédio ou Botão +)
-  const renderItem = (item) => {
+  const renderItem = (item: any) => {
     // Mapear a imagem para o tipo de ícone esperado pelo config
     // Como estamos usando require(), precisamos de uma lógica para passar o identificador correto
     // Visto que no Config temos um map reverso, vamos passar uma string identificadora simples baseada no ID ou Nome por enquanto
@@ -67,26 +102,61 @@ export default function MorningScreen() {
     if (item.name === "Amoxicilina") iconType = "blue";
     if (item.name === "Dorflex") iconType = "yellow";
 
-    // Verifica se esse remédio já está cadastrado pelo usuário
-    const existingMedicine = userMedicines.find((m) => m.name === item.name);
+    // Verifica se esse remédio já está cadastrado pelo usuário (busca no state geral original)
+    // Se estamos renderizando um item que veio do userMedicines (tem uuid), ele já é "existing".
+    // Se veio do Mock, precisamos ver se existe uma versão dele no userMedicines (mas se filtramos antes, não deveria existir)
+
+    // Melhor abordagem para o onPress:
+    // Se o item tem ID numérico (mock), é configuração nova.
+    // Se tem UUID (string), é update/details.
+
+    const isUserMedicine = typeof item.id === "string"; // UUID é string
 
     return (
       <TouchableOpacity
         key={item.id}
         style={styles.gridItem}
         onPress={() => {
-          if (existingMedicine) {
-            // Se já existe, vai direto para Detalhes
+          if (isUserMedicine) {
             router.push({
               pathname: "/medicine-details",
-              params: { id: existingMedicine.id },
+              params: { id: item.id },
             });
           } else {
-            // Se não existe, vai para Configuração
+            // Mock clicked -> Configurar novo com pré-fill
             router.push({
               pathname: "/medicine-config",
               params: { initialName: item.name, iconType: iconType },
             });
+          }
+        }}
+        onLongPress={() => {
+          if (isUserMedicine) {
+            Alert.alert(
+              "Excluir Medicamento",
+              "Deseja excluir este medicamento?",
+              [
+                { text: "Cancelar", style: "cancel" },
+                {
+                  text: "Excluir",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      const { error } = await supabase
+                        .from("medicines")
+                        .delete()
+                        .eq("id", item.id);
+
+                      if (error) throw error;
+                      fetchUserMedicines(); // Atualiza a lista
+                    } catch (e) {
+                      Alert.alert("Erro", "Falha ao excluir.");
+                      console.log(e);
+                    }
+                  },
+                },
+              ]
+            );
           }
         }}
       >
@@ -96,6 +166,38 @@ export default function MorningScreen() {
             style={{ width: "80%", height: "80%" }}
             resizeMode="contain"
           />
+          {isUserMedicine && (
+            <TouchableOpacity
+              style={styles.deleteBadge}
+              onPress={() => {
+                Alert.alert("Excluir", "Apagar este medicamento?", [
+                  { text: "Não", style: "cancel" },
+                  {
+                    text: "Sim",
+                    style: "destructive",
+                    onPress: async () => {
+                      try {
+                        const { error } = await supabase
+                          .from("medicines")
+                          .delete()
+                          .eq("id", item.id);
+                        if (error) throw error;
+                        fetchUserMedicines();
+                      } catch (e) {
+                        console.log(e);
+                      }
+                    },
+                  },
+                ]);
+              }}
+            >
+              <MaterialCommunityIcons
+                name="close-circle"
+                size={24}
+                color="#FF4444"
+              />
+            </TouchableOpacity>
+          )}
         </View>
         <Text style={styles.itemText} numberOfLines={1}>
           {item.name}
@@ -105,15 +207,15 @@ export default function MorningScreen() {
   };
 
   // Botão de Adicionar (+)
-  const renderAddButton = (index) => (
+  const renderAddButton = (index: number) => (
     <TouchableOpacity
       key={`add-${index}`}
       style={styles.gridItem}
       onPress={() =>
-        Alert.alert(
-          "Em Breve",
-          "Nas próximas atualizações você poderá incluir novos medicamentos."
-        )
+        // Navega para Configuração sem parâmetros, indicando "Novo Medicamento"
+        router.push({
+          pathname: "/medicine-config",
+        })
       }
     >
       <View style={[styles.iconBox, styles.addBox]}>
@@ -163,8 +265,8 @@ export default function MorningScreen() {
 
           {/* Grid de Medicamentos */}
           <View style={styles.gridContainer}>
-            {/* Renderiza remédios existentes */}
-            {MOCK_MEDICINES.map((med) => renderItem(med))}
+            {/* Renderiza remédios combinados */}
+            {combinedMedicines.map((med: any) => renderItem(med))}
 
             {/* Renderiza botões de + para preencher visualmente a grade (ex: completar até 9 itens) */}
             {[...Array(5)].map((_, i) => renderAddButton(i))}
@@ -284,5 +386,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: "serif",
     fontWeight: "bold",
+  },
+  deleteBadge: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    elevation: 5,
   },
 });
